@@ -140,10 +140,12 @@ def convert_gather(node, params, layers, lambda_func, node_name, keras_name):
         layers[node_name] = gathered
     else:
         input_0 = ensure_tf_type(layers[node.input[0]], name="%s_const" % keras_name)
-        if not isinstance(layers[node.input[1]], np.ndarray) and \
-                K.is_keras_tensor(layers[node.input[1]]):
+        if isinstance(layers[node.input[1]], (np.integer, int)) or \
+            (not isinstance(layers[node.input[1]], np.ndarray) and \
+                K.is_keras_tensor(layers[node.input[1]])):
+            #indices are keras tensor or int
             indices = layers[node.input[1]]
-        else:
+        else: #indices are numpy/tf.eager
             indices = layers[node.input[1]]
             if not is_numpy(layers[node.input[1]]):
                 indices = indices.numpy()
