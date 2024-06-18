@@ -773,12 +773,16 @@ def convert_nms(node, params, layers, lambda_func, node_name, keras_name):
             score_threshold = score_threshold[0]
     num_classes = scores.shape[1]
     all_results = []
+    try:
+        iou_threshold = iou_threshold[0]
+    except IndexError: #iou threshold is already a scalar
+        pass
     for batch in range(batch_size):
         for c_class in range(num_classes):
             indices = tf.image.non_max_suppression(boxes=boxes[batch],
                                                    scores=scores[batch, c_class],
                                                    max_output_size=tf.cast(max_output_size[0], tf.int32),
-                                                   iou_threshold=iou_threshold[0],
+                                                   iou_threshold=iou_threshold,
                                                    score_threshold=score_threshold)
             class_tensor = c_class * tf.ones_like(indices)
             batch_tensor = batch * tf.ones_like(indices)
