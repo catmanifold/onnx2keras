@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 from keras import backend as K
 from keras.layers import SlicingOpLambda, Lambda
+from typing import Union
 
 from .utils import is_numpy, ensure_tf_type, unsqueeze_tensors_of_rank_one
 
@@ -65,6 +66,45 @@ def convert_shape(node, params, layers, lambda_func, node_name, keras_name):
         layers[node_name] = tf.shape(input_0, out_type=tf.int64)
 
 
+def optimize_constant_array_for_serialization(params: tf.Tensor, indices: Union[np.ndarray, tf.Tensor], logger):
+    """
+    Some models contain repetition in the constant array tf.gather gathers from.
+    In such cases, serialization takes a long time. serializing 3000 elements take ~3 sec (and scale linearly).
+    To optimize for this case, we detect the repetition, take the modulu of the repetition from indices,
+    and making the param array shorter.
+    This is especially useful for models containing pre-top-k elements.
+    Args:
+        params: the array to gather on
+        indices: the indices to gather
+
+    Returns:
+        params: the new array to gather on
+        indices: the new indices to gather
+    """
+    # This Optimization is a must for models with Pre-Top-K needs
+    logger.debug('onnx2keras.gather - Encountered long gather. '
+                 'Trying to shorten it for easy serialization')
+    max_inp = tf.reduce_max(params)
+    min_inp = tf.reduce_min(params)
+    if len(params) % (max_inp - min_inp + 1) == 0:
+        range_inp = tf.range(min_inp, max_inp + 1, dtype=params.dtype)
+        reshape_columns = tf.reshape(params, [-1, max_inp + 1])
+        if tf.reduce_sum(tf.abs((reshape_columns - range_inp[None, :]))) == 0:
+            # [0,1,2,3,0,1,2,3]
+            logger.debug('onnx2keras.gather - Shortening sequence - columns')
+            indices = indices % (max_inp + 1)
+            params = range_inp
+        else:
+            repetition_len = np.argmin(params == params[0])
+            if repetition_len > 0 and len(params) % repetition_len == 0:
+                reshaped_rows = tf.reshape(params, [-1, repetition_len])
+                first_row = reshaped_rows[:, 0]
+                if tf.reduce_sum(tf.abs(reshaped_rows - first_row[:, None])) == 0:
+                    logger.debug('onnx2keras.gather - Shortening sequence - rows')
+                    indices = indices % repetition_len
+                    params = first_row
+    return params, indices
+
 def convert_gather(node, params, layers, lambda_func, node_name, keras_name):
     """
     Convert gather.
@@ -77,10 +117,10 @@ def convert_gather(node, params, layers, lambda_func, node_name, keras_name):
     :return: None
     """
     logger = logging.getLogger('onnx2keras.gather')
+    OPTIMIZE_ARRAY_LENGTH = 50000
     axis = params.get('axis', 0)
     if is_numpy(layers[node.input[0]]) and is_numpy(layers[node.input[1]]) and not 'is_embedding' in params:
         logger.debug('Gather from numpy array')
-
         if axis == 0:
             gathered = np.array(layers[node.input[0]][layers[node.input[1]]])
         elif axis == 1:
@@ -132,7 +172,9 @@ def convert_gather(node, params, layers, lambda_func, node_name, keras_name):
                 indices += dim_len
             if tf.is_tensor(indices):
                 indices = tf.where(indices < 0, indices + dim_len, indices)
-
+            if isinstance(input_0, np.ndarray) or not  K.is_keras_tensor(input_0):
+                if len(input_0) > OPTIMIZE_ARRAY_LENGTH:
+                    input_0, indices = optimize_constant_array_for_serialization(input_0, indices, logger)
             layers[node_name] = tf.gather(input_0, indices, axis=axis)
 
 
