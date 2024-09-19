@@ -2,9 +2,10 @@ import logging
 
 import keras
 import numpy as np
-import tensorflow as tf
 from keras import backend as K
+import tensorflow as tf
 
+from .customonnxlayer.onnxeinsum import OnnxEinsumLayer
 from .exceptions import UnsupportedLayer
 from .utils import is_numpy, ensure_tf_type, ensure_float
 from .tfops_funcs import tf_math_abs, tf_clip_by_value, tf_math_negative, K_mean, tf_math_reduce_prod,\
@@ -889,10 +890,17 @@ def convert_if(node, params, layers, lambda_func, node_name, keras_name):
 
 
 def convert_einsum(node, params, layers, lambda_func, node_name, keras_name):
-    # input_0 = layers[node.input[0]]
-    # input_1 = layers[node.input[1]]
-    # equation = params['equation'].decode('utf-8')
-    # layers[node_name] = tf.einsum(equation, *[input_0, input_1], name=keras_name)
-    input_0 = tf_expand_dims(layers[node.input[0]], axis=2, tf_name=f"{params['cleaned_name']}_einsum_0")
-    input_1 = tf_expand_dims(layers[node.input[1]], axis=0, tf_name=f"{params['cleaned_name']}_einsum_1")
-    layers[node_name] = tf_multiply(input_0, input_1, tf_name=f"{params['cleaned_name']}_einsum_mult")
+    input_0 = layers[node.input[0]]
+    input_1 = layers[node.input[1]]
+    equation = params['equation'].decode('utf-8')
+
+    if isinstance(input_0, tf.Tensor) and isinstance(input_1, tf.Tensor):
+        layers[node_name] = tf.einsum(equation, *[input_0, input_1], name=keras_name)
+    elif isinstance(input_0, tf.Tensor):
+        layers[node_name] = OnnxEinsumLayer(equation, input_0, 0)(input_1, name=keras_name)
+    elif isinstance(input_1 , tf.Tensor):
+        layers[node_name] = OnnxEinsumLayer(equation, input_1, 1)(input_0, name=keras_name)
+    else:
+        layers[node_name] = OnnxEinsumLayer(equation, None, None)([input_0, input_1], name=keras_name)
+
+
