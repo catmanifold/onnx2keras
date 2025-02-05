@@ -16,7 +16,7 @@ numpy = "1.23.5"
 fvcore = "^0.1.5.post20221221"
 boto3 = "^1.24.22"
 tensorflow-io-gcs-filesystem = "0.34.0"
-keras-data-format-converter = "0.1.20.dev2"
+keras-data-format-converter = "0.1.20.dev3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"

@@ -18,6 +18,16 @@ jobs:
         with:
           python-version: 3.8
       #---------------------------#
+      - name: Compute Cache Key (Ignoring Only [tool.poetry] version)
+        id: compute-cache-key
+        run: |
+          awk '
+            /^\[tool.poetry\]/ {p=1}
+            /^\[/ && !/^\[tool.poetry\]/ {p=0}
+            p && /^[[:space:]]*version[[:space:]]*=/ {next}
+            {print}
+          ' pyproject.toml | sha256sum | cut -d " " -f1 > cache_key.txt
+          echo "cache_key=venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-$(cat cache_key.txt)" >> $GITHUB_OUTPUT
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -30,7 +40,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: .venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-5
+          key:  ${{ steps.compute-cache-key.outputs.cache_key }}
       - name: Install dependencies
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: poetry install --no-interaction --no-root --with=dev
@@ -50,6 +60,7 @@ jobs:
           .venv/bin/python --version
     outputs:
         python-version: ${{ steps.setup-python.outputs.python-version }}
+        cache_key: ${{ steps.compute-cache-key.outputs.cache_key }}
   test:
     runs-on: ubuntu-latest
     needs: python-setup
@@ -73,12 +84,12 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-      - name: Load cached venv
+      - name: Load cached venv from setup job
         id: cached-poetry-dependencies
         uses: actions/cache@v2
         with:
           path: .venv
-          key: venv-${{ runner.os }}-${{ needs.python-setup.outputs.python-version }}-5
+          key: ${{ needs.python-setup.outputs.cache_key }}
       - name: Debug pytest in test job
         run: |
           ls -l .venv/bin/pytest || echo "pytest not found!"
